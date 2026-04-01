@@ -19,5 +19,9 @@
     "real-time",
     "react",
     "nextjs"
-  ]
+  ],
+  "skills": "./skills/",
+  "agents": "./agents/",
+  "guides": "./guides/",
+  "mcpServers": ".mcp.json"
 }

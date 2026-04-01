@@ -69,6 +69,10 @@ for (const skill of SKILLS) {
 console.log("\n  Agent:");
 check("Agent: velt-expert", existsSync(resolve(ROOT, "agents", "velt-expert.md")));
 
+// CLAUDE.md (always-on rules for Claude Code)
+console.log("\n  Rules:");
+check("CLAUDE.md exists", existsSync(resolve(ROOT, "CLAUDE.md")));
+
 // Guides
 console.log("\n  Guides:");
 check("Guide: velt-rules.md", existsSync(resolve(ROOT, "guides", "velt-rules.md")));
