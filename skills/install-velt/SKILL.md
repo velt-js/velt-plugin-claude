@@ -1,4 +1,5 @@
 ---
+name: install-velt
 description: Full guided installation of the Velt collaboration SDK into a React or Next.js project.
 ---
 
