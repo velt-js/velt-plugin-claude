@@ -1,11 +1,6 @@
 # Velt Best Practices Guide
 
-This guide contains distilled best practices from the Velt agent-skills. All skills and the velt-expert agent should consult this guide as the primary source of truth.
-
-## Priority Chain
-1. **This guide** (embedded rules) — always check first
-2. **Installed agent-skills** (velt-setup-best-practices, velt-comments-best-practices, velt-crdt-best-practices, velt-notifications-best-practices) — detailed patterns
-3. **velt-docs MCP** — query for anything not covered above
+Reference material for Velt SDK patterns. For detailed implementation, read the agent-skill rule files referenced in the MCP installation plan.
 
 ---
 
@@ -194,23 +189,51 @@ Comments in a side column, scroll-synced.
 ```
 
 ### TipTap Editor Integration
+
+"TipTap Comments" = comments INSIDE a TipTap editor using `TiptapVeltComments` extension.
+This is NOT freestyle pin comments on a page containing a TipTap editor.
+
 ```bash
 npm install @veltdev/tiptap-velt-comments
 ```
-```jsx
-import { TiptapVeltComments, addComment, renderComments } from '@veltdev/tiptap-velt-comments';
+```tsx
+import { BubbleMenu } from "@tiptap/react/menus"; // SUBPATH EXPORT — only this path works
+import { TiptapVeltComments, addComment, renderComments } from "@veltdev/tiptap-velt-comments";
+import { useCommentAnnotations } from "@veltdev/react";
 
 // Disable default text mode when using editor
 <VeltComments textMode={false} />
 
-// Add extension to editor
-extensions: [StarterKit, TiptapVeltComments]
+// Extensions — TiptapVeltComments BEFORE VeltCrdt (wrong order = FREEZE)
+extensions: [
+  StarterKit.configure({ undoRedo: false }),
+  TiptapVeltComments,              // BEFORE VeltCrdt
+  ...(VeltCrdt ? [VeltCrdt] : []), // LAST
+]
+
+// renderComments — ALL THREE params required
+const commentAnnotations = useCommentAnnotations();
+useEffect(() => {
+  if (editor && commentAnnotations) {
+    renderComments({ editor, editorId, commentAnnotations });
+  }
+}, [editor, editorId, commentAnnotations]);
+
+// BubbleMenu with onClick (NOT onMouseDown)
+<BubbleMenu editor={editor}>
+  <button onClick={(e) => {
+    e.preventDefault();
+    addComment({ editor, editorId });
+  }}>Add Comment</button>
+</BubbleMenu>
 ```
 
 ## Key Rules
 - VeltCommentTool is required for users to initiate freestyle comments
-- For popover mode: each element needs a unique ID + matching targetElementId
 - For editor integrations (TipTap/Lexical/Slate): disable textMode={false}
+- BubbleMenu: import from `@tiptap/react/menus` (NOT `@tiptap/react`)
+- Use `onClick`, NOT `onMouseDown` for comment buttons
+- `addComment` and `renderComments` REQUIRE `editorId` parameter
 - Comments sidebar: use VeltCommentsSidebar + VeltSidebarButton
 
 
@@ -221,25 +244,6 @@ extensions: [StarterKit, TiptapVeltComments]
 ## Installation
 React: `npm install @veltdev/crdt-react @veltdev/crdt @veltdev/react`
 Other: `npm install @veltdev/crdt @veltdev/client`
-
-## Store Types
-| Type | Yjs Type | Use Case |
-|------|----------|----------|
-| text | Y.Text | Notes, code, plain text |
-| array | Y.Array | Lists, queues, sequences |
-| map | Y.Map | Settings, forms, key-value |
-| xml | Y.XmlFragment | Rich editors (Tiptap, BlockNote) |
-
-## React Hook
-```jsx
-import { useVeltCrdtStore } from '@veltdev/crdt-react';
-
-const { value, update, store } = useVeltCrdtStore({
-  id: 'my-store',
-  type: 'text',
-  initialValue: '',
-});
-```
 
 ## Tiptap CRDT Integration
 ```bash
@@ -252,18 +256,63 @@ const { VeltCrdt } = useVeltTiptapCrdtExtension({ editorId: 'my-editor' });
 
 const editor = useEditor({
   extensions: [
-    StarterKit.configure({ history: false }), // CRITICAL: disable history
+    StarterKit.configure({ undoRedo: false }), // CRITICAL: Tiptap v3 uses undoRedo, NOT history
     ...(VeltCrdt ? [VeltCrdt] : []),
   ],
 }, [VeltCrdt]);
 ```
 
+## BubbleMenu Import (Tiptap v3)
+- CORRECT: `import { BubbleMenu } from "@tiptap/react/menus"` (subpath export — only resolves in bundler, not Node.js shell)
+- WRONG: `import { BubbleMenu } from "@tiptap/react"` (removed in v3)
+- WRONG: `import { BubbleMenu } from "@tiptap/extension-bubble-menu"` (headless extension, not React component)
+- Requires: `npm install @floating-ui/dom`
+
 ## Critical Rules
-- ALWAYS disable Tiptap history when using CRDT: `StarterKit.configure({ history: false })`
+- ALWAYS disable Tiptap undo/redo when using CRDT: `StarterKit.configure({ undoRedo: false })` (Tiptap v3 uses `undoRedo`, NOT `history`)
 - VeltProvider must wrap app before creating CRDT stores
 - Store ID must be unique per collaborative instance
-- Add CSS for collaboration cursors (see tiptap-cursor-css rule)
+- Add CSS for collaboration cursors (see `velt-crdt-best-practices` → `tiptap-cursor-css` rule)
 - Use editorId to uniquely identify each editor instance
+- TiptapVeltComments MUST come BEFORE VeltCrdt in extensions array (wrong order causes freeze)
+- renderComments and addComment REQUIRE editorId parameter
+- Use onClick (NOT onMouseDown) for comment buttons
+
+## Required Cursor CSS (add to globals.css)
+```css
+.ProseMirror .ProseMirror-yjs-cursor {
+  position: relative;
+  border-left: 2px solid #0d0d0d;
+  border-right: none;
+  margin-left: -1px;
+  margin-right: -1px;
+  pointer-events: none;
+  word-break: normal;
+}
+.ProseMirror .ProseMirror-yjs-cursor > span {
+  display: inline !important;
+}
+.ProseMirror .ProseMirror-yjs-cursor > div {
+  position: absolute;
+  top: -1.4em;
+  left: -1px;
+  font-size: 12px;
+  font-weight: 600;
+  font-style: normal;
+  line-height: normal;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px 3px 3px 0;
+  color: white;
+  white-space: nowrap;
+  user-select: none;
+}
+.ProseMirror .ProseMirror-yjs-selection {
+  opacity: 0.3;
+}
+velt-comment-text[comment-available="true"] {
+  background-color: rgba(255, 212, 0, 0.3);
+}
+```
 
 
 ---
@@ -321,4 +370,3 @@ import { VeltNotificationsPanel } from '@veltdev/react';
 
 
 ---
-

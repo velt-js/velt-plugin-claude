@@ -5,6 +5,8 @@
   "description": "Claude Code plugin for the Velt collaboration SDK",
   "type": "module",
   "scripts": {
-    "sync": "node scripts/sync-agent-skills.mjs"
+    "sync": "node scripts/sync-agent-skills.mjs",
+    "validate": "node scripts/validate.mjs",
+    "all": "npm run sync && npm run validate"
   }
 }

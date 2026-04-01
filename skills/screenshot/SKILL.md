@@ -24,7 +24,3 @@ Use when the user wants to see the current state of their app, identify UI areas
 ## Output
 - Screenshot of the running application
 - Optional: recommended comment placement locations
-
-
----
-**Important**: Always consult `guides/velt-rules.md` for embedded best practices before querying external sources.
