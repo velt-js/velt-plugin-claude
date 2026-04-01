@@ -59,8 +59,7 @@ if (mcpExists) {
 // Skills
 console.log("\n  Skills:");
 const SKILLS = [
-  "install-velt", "add-comments", "add-crdt", "add-notifications",
-  "add-presence", "add-cursors", "screenshot", "velt-help",
+  "install-velt", "velt-help",
 ];
 for (const skill of SKILLS) {
   check(`Skill: ${skill}`, existsSync(resolve(ROOT, "skills", skill, "SKILL.md")));
@@ -79,6 +78,8 @@ console.log("\n  Agent Skills:");
 const AGENT_SKILLS = [
   "velt-setup-best-practices", "velt-comments-best-practices",
   "velt-crdt-best-practices", "velt-notifications-best-practices",
+  "velt-recorder-best-practices", "velt-self-hosting-data-best-practices",
+  "velt-single-editor-mode-best-practices",
 ];
 for (const skill of AGENT_SKILLS) {
   check(`Bundled: ${skill}`, existsSync(resolve(ROOT, "skills", skill, "SKILL.md")));

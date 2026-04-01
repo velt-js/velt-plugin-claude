@@ -30,6 +30,9 @@ const AGENT_SKILLS = [
   "velt-comments-best-practices",
   "velt-crdt-best-practices",
   "velt-notifications-best-practices",
+  "velt-recorder-best-practices",
+  "velt-self-hosting-data-best-practices",
+  "velt-single-editor-mode-best-practices",
 ];
 
 console.log(`[sync] Source: ${source}`);
