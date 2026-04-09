@@ -1,4 +1,5 @@
 ---
+name: velt-help
 description: Answer questions about Velt features, best practices, and SDK usage.
 ---
 
