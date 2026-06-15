@@ -6,7 +6,7 @@
     },
     "velt-docs": {
       "type": "http",
-      "url": "https://docs.velt.dev/mcp"
+      "url": "https://velt.dev/docs/mcp"
     }
   }
 }
