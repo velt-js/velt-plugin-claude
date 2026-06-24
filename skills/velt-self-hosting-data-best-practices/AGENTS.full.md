@@ -1,6 +1,6 @@
 # Velt Self Hosting Data Best Practices
 
-**Version 1.0.5**  
+**Version 1.0.12**  
 Velt  
 March 2026
 
@@ -1034,16 +1034,16 @@ interface SaveAttachmentResolverData { url: string; }   // persisted back onto A
 
 The attachment provider sits **outside** the `Partial<X>` strip model used by every other provider. There is no `get` and no `Partial<Attachment>` — attachments are binary files. When Velt hands a save call to your storage provider, the payload is a fixed shape:
 The JSON `request` body in URL (endpoint) mode is exactly `{ attachment: { attachmentId, name, mimeType }, metadata, event }` — the `File` is destructured out and sent as a separate multipart binary part to your storage, **never to Velt**. On delete, Velt sends `{ attachmentId, metadata: { apiKey, documentId, organizationId, folderId? }, event }` where `event` is `ATTACHMENT_DELETE` (`"attachment.delete"`).
-What persists on Velt's side after a successful save (everything except the binary bytes): `attachmentId` (PK), `name`, `bucketPath`, `size`, `type`, `url` (the URL **your** storage returned), `thumbnail`, `thumbnailWithPlayIconUrl`, `metadata` (arbitrary), `mimeType`, `previewImages`, and the `isAttachmentResolverUsed` flag. The `url` is the only field that comes from your `save` response; the rest are structural.
+What persists on Velt's side after a successful save (everything except the binary bytes): `attachmentId` (PK), `name`, `size`, `type`, `url` (the URL **your** storage returned), `thumbnail`, `thumbnailWithPlayIconUrl`, `metadata` (arbitrary), `mimeType`, `previewImages`, and the `isAttachmentResolverUsed` flag. The `url` is the only field that comes from your `save` response; the rest are structural.
 
 **Incorrect (assuming `request.attachment` is a full `Attachment` object — only three sub-fields are guaranteed):**
 
 ```tsx
 const saveAttachment = async (request: SaveAttachmentResolverRequest) => {
-  // BUG: `bucketPath`, `size`, `thumbnail`, `previewImages` are not in `request.attachment`.
+  // BUG: `size`, `thumbnail`, `previewImages` are not in `request.attachment`.
   // Velt computes those on its side from the `{ url }` you return plus the binary it just handed you.
-  const { attachmentId, name, mimeType, bucketPath, size } = request.attachment as any;
-  const url = await storage.put(request.file, { bucketPath }); // `bucketPath` is undefined
+  const { attachmentId, name, mimeType, size, thumbnail } = request.attachment as any;
+  const url = await storage.put(request.file, { size }); // `size` is undefined
   return { data: { url }, success: true, statusCode: 200 };
 };
 ```
@@ -1314,8 +1314,10 @@ interface DataProviderConfig {
 }
 
 interface RetryConfig {
-  retryCount: number;                // Max retry attempts
-  retryDelay: number;                // Delay between retries (ms)
+  retryCount?: number;               // Max retry attempts
+  retryDelay?: number;               // Delay between retries (ms)
+  revertOnFailure?: boolean;         // Activity `saveRetryConfig` only — revert the optimistic cache
+                                     // update when the save ultimately fails after all retries
 }
 ```
 
@@ -1455,6 +1457,8 @@ Reference: https://docs.velt.dev/self-host-data/users
 
 The activity data provider handles PII for activity log records — comment text embedded in change history, feature-specific entity snapshots (e.g., PR titles, deployment metadata), and arbitrary custom fields. The SDK strips configured fields before writing to Velt and re-hydrates them on read via your `get` handler.
 
+Both `get` and `save` can be supplied as either a **callback function** (`get` / `save`) **or** a **config endpoint URL** (`getConfig` / `saveConfig`). Each method is valid as long as one of the two forms is set; the modes can be mixed (e.g., function `get` with endpoint `saveConfig`). See [[provider-retry-timeout]] for the retry/timeout knobs shared across all providers.
+
 **ActivityAnnotationDataProvider interface:**
 
 ```typescript
@@ -1478,9 +1482,20 @@ interface SaveActivityResolverRequest {
 
 interface ResolverConfig {
   resolveTimeout?: number;
-  fieldsToRemove?: string[]; // Extra fields to strip beyond defaults
+  getRetryConfig?: RetryConfig;         // Retry behavior for `get`
+  saveRetryConfig?: RetryConfig;        // Retry behavior for `save` (supports `revertOnFailure`)
+  getConfig?: ResolverEndpointConfig;   // Endpoint URL + headers for fetching activity PII
+  saveConfig?: ResolverEndpointConfig;  // Endpoint URL + headers for saving stripped activity PII
+  fieldsToRemove?: string[];            // Extra fields to strip beyond defaults
+}
+
+interface ResolverEndpointConfig {
+  url: string;
+  headers?: Record<string, string>;
 }
 ```
+
+Note: activity is **append-only**, so there is no `delete` / `deleteConfig`.
 
 **Function-based example:**
 
@@ -1512,8 +1527,32 @@ const activityDataProvider: ActivityAnnotationDataProvider = {
 <VeltProvider apiKey={KEY} authProvider={auth} dataProviders={{
   activity: activityDataProvider,
 }}>
+const activityResolverConfig = {
+  getConfig: {
+    url: 'https://your-backend.com/api/velt/activity/get',
+    headers: { 'Authorization': 'Bearer YOUR_TOKEN' }
+  },
+  saveConfig: {
+    url: 'https://your-backend.com/api/velt/activity/save',
+    headers: { 'Authorization': 'Bearer YOUR_TOKEN' }
+  },
+  resolveTimeout: 60000,
+  getRetryConfig: { retryCount: 3, retryDelay: 2000 },
+  saveRetryConfig: { retryCount: 3, retryDelay: 2000, revertOnFailure: true },
+  fieldsToRemove: ['customSensitiveField']
+};
+
+const activityDataProvider = {
+  config: activityResolverConfig
+};
+
+<VeltProvider apiKey={KEY} authProvider={auth} dataProviders={{
+  activity: activityDataProvider,
+}}>
 ```
 
+**Endpoint-based example** (SDK performs the POST for you; pair `getConfig` and/or `saveConfig` with retry/timeout/`fieldsToRemove` on the same `config` object):
+The SDK POSTs the same `GetActivityResolverRequest` / `SaveActivityResolverRequest` bodies the function-based handlers would receive, and expects the same `ResolverResponse` shape back. Do not modify the endpoint URLs — copy them verbatim into your config. `saveRetryConfig.revertOnFailure: true` rolls back the optimistic cache update when the save retries are exhausted.
 **Compatibility:** Currently only compatible with the `setDocuments` method. Providers must be set before `identify()` is called.
 
 **Storage-boundary contract (what persists where):**
@@ -1577,7 +1616,7 @@ const activityDataProvider: ActivityAnnotationDataProvider = {
 };
 ```
 
-Reference: https://docs.velt.dev/self-host-data/activity ("Sample Data"); https://docs.velt.dev/self-host-data/field-inventory - "Activity strip rules"
+Reference: https://docs.velt.dev/self-host-data/activity ("Implementation Approaches", "Endpoint based DataProvider", "Function based DataProvider", "Sample Data"); https://docs.velt.dev/self-host-data/field-inventory - "Activity strip rules"
 
 ---
 
@@ -1855,9 +1894,9 @@ const recorderStorage: AttachmentDataProvider = {
 
 ```tsx
 const saveRecorder = async (request) => {
-  // BUG: Velt still tracks { attachmentId, name, bucketPath } stubs for storage cleanup.
+  // BUG: Velt still tracks { attachmentId, name } stubs for each attachment.
   // If your DB is the only source of truth for attachment IDs, you risk orphaning bucket objects
-  // because Velt expects bucketPath to round-trip through the stub.
+  // because Velt no longer retains a storage path back to your bucket.
   for (const partial of Object.values(request.recorderAnnotations)) {
     await db.saveAttachments(partial.attachments); // assumes Velt has nothing — wrong
   }
@@ -1865,7 +1904,7 @@ const saveRecorder = async (request) => {
 };
 ```
 
-**Correct (your DB stores the PII-bearing fields; Velt keeps stubs for cleanup; both halves are needed):**
+**Correct (your DB stores the PII-bearing fields; Velt keeps `{ attachmentId, name }` stubs; both halves are needed):**
 
 ```tsx
 const saveRecorder = async (request) => {
@@ -1873,7 +1912,6 @@ const saveRecorder = async (request) => {
     // partial.transcription          → entire object, your DB only
     // partial.from                   → full User object (PII)
     // partial.attachments[]          → full attachment objects including url
-    // partial.chunkUrls              → full map
     // partial.recordingEditVersions  → per-version PII (only versions with ≥1 PII field present)
     await db.upsertRecorderPII(annotationId, partial);
   }
@@ -2622,6 +2660,7 @@ result = sdk.api.documents.addDocuments(
 | GDPR | `sdk.api.gdpr` |
 | Workspace | `sdk.api.workspace` |
 | Token | `sdk.api.token` |
+| Workflow | `sdk.api.workflow` |
 
 ---
 
@@ -2728,7 +2767,66 @@ from velt_py import (
 )
 ```
 
-Reference: `https://docs.velt.dev/api-reference/sdk/python/users` (## Python SDK > ### Users & Reactions)
+**Verification:**
+
+```python
+from velt_py.models.reaction import PartialReactionAnnotation
+from velt_py.models.user import PartialUser
+
+@dataclass
+class PartialReactionAnnotation:
+    annotationId: str
+    metadata: Optional[BaseMetadata] = None
+    icon: Optional[str] = None
+    from_: Optional[PartialUser] = None             # 'from' on the wire; from_ avoids the Python keyword. Replaces the former 'user' field.
+    extra_fields: Optional[Dict[str, Any]] = None   # Catch-all for customer-configured custom keys.
+```
+
+**Incorrect (v0.1.11-style construction; breaks on v0.1.12):**
+
+```python
+from velt_py.models.reaction import PartialReactionAnnotation
+from velt_py.models.user import PartialUser
+
+# `user=` is no longer a valid constructor kwarg in v0.1.12 — raises TypeError
+ann = PartialReactionAnnotation(
+    annotationId='r-1',
+    icon='+1',
+    user=PartialUser(userId='u-1'),
+)
+ann.to_dict()  # would have emitted {'user': {...}} pre-v0.1.12
+```
+
+**Correct (v0.1.12 — use `from_=`, serializes as `from`):**
+
+```python
+from velt_py.models.reaction import PartialReactionAnnotation
+from velt_py.models.user import PartialUser
+
+ann = PartialReactionAnnotation(
+    annotationId='r-1',
+    icon='+1',
+    from_=PartialUser(userId='u-1'),
+)
+ann.to_dict()['from']  # {'userId': 'u-1'}  — serialized as `from`
+```
+
+**Correct (backward-compatible reads — legacy `user` documents still resolve):**
+
+```python
+# Legacy document stored under the old `user` key still resolves:
+ann = PartialReactionAnnotation.from_dict({
+    'annotationId': 'r-1',
+    'icon': '+1',
+    'user': {'userId': 'u-legacy'},
+})
+ann.from_.userId         # 'u-legacy'
+ann.to_dict()['from']    # {'userId': 'u-legacy'}  (re-serialized as `from`)
+```
+
+References:
+- `https://docs.velt.dev/api-reference/sdk/python/users` (## Python SDK > ### Users & Reactions)
+- `https://docs.velt.dev/backend-sdks/python` (### `PartialReactionAnnotation`)
 
 ---
 
@@ -2817,3 +2915,4 @@ Reference: https://docs.velt.dev/self-host-data/overview - "Debugging"; https://
 - https://docs.velt.dev/self-host-data/activity
 - https://docs.velt.dev/self-host-data/notifications
 - https://docs.velt.dev/self-host-data/field-inventory
+- https://docs.velt.dev/backend-sdks/python
